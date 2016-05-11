@@ -2,7 +2,8 @@ from collections import deque
 from threading import Thread
 from math import ceil
 from threading import *
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from elasticsearch import Elasticsearch
 from tide import TideService
 class ImportadorElastic:
@@ -11,7 +12,7 @@ class ImportadorElastic:
 
     def __init__(self, numMaxThreads, nomeDoTipoDocumento, nomeDoIndice):
         self.fila = deque()
-        self.executor = ThreadPoolExecutor(max_workers=numMaxThreads)
+        self.numMaxThreads = numMaxThreads
         self.currentThreadGerenciadoraDeFila = None
         self.elastic = Elasticsearch()
         self.nomeDoTipoDocumento = nomeDoTipoDocumento
@@ -19,20 +20,22 @@ class ImportadorElastic:
         self.tideService = TideService()
 
 
-
     def iniciarServico(self):
-        self.currentThreadGerenciadoraDeFila = Thread(daemon=True, target=)
+        #self.currentThreadGerenciadoraDeFila = Thread(daemon=True, target=self.importarRegistros)
+        self.importarRegistros()
+
 
     def importarRegistros(self):
         fetchSize = 100
         totalOcorrencias = self.tideService.countOcorrencias()
-        for page in range(1..ceil(totalOcorrencias/fetchSize)):
-            ocorrencias = self.tideService.listOcorrencias(page*fetchSize)
-            for o in ocorrencias:
-                self.fila.append(o)
 
-
-        return self.executor.submit(self.__importar, registro)
+        with ThreadPoolExecutor(max_workers=self.numMaxThreads) as executor:
+            for page in range(1..ceil(totalOcorrencias/fetchSize)):
+                #constroi gerador de future inserindo ocorrencia
+                ocorrencias = self.tideService.listOcorrencias(page * fetchSize)
+                future_generator_ocorrencia = {executor.submit(self.__importar, o): o for o in ocorrencias}
+                while (not as_completed(future_generator_ocorrencia)):
+                    time.sleep(3)
 
     def __importar(self, registro):
         t = current_thread()
@@ -40,3 +43,8 @@ class ImportadorElastic:
             self.elastic.index(doc_type=self.nomeDoTipoDocumento, index=self.nomeDoIndice, body=registro)
         except:
             print("Ocorreu um erro com a thread {}, no registro {}".format(t, registro))
+
+
+if __name__ == '__main__':
+    imp = ImportadorElastic(20, 'tide', 'ocorrencia')
+    imp.iniciarServico()
