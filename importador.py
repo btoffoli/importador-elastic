@@ -10,14 +10,27 @@ from tide_connection import TideConnection
 
 
 class ImportadorElastic:
+    @staticmethod
+    def ocorrencia_to_map(o):
+        map = {
+            'id': o[0],
+            'protocolo': o[1],
+            'cod_ocorrencia': o[2],
+            'data_hora_criacao': o[3],
+            'data_hora_fim': o[4],
+            'data_hora_inicio': o[5]
+        }
+        return map
+
+    URL_ELASTIC = 'http://192.168.0.7:9200'
     SQL_QUERY_COUNT = 'SELECT COUNT(1) FROM ocorrencia'
-    SQL_QUERY_OCORRENCIA = 'SELECT o.* FROM ocorrencia o ORDER BY data_hora_criacao ASC LIMIT :limit OFFSET :offset'
+    SQL_QUERY_OCORRENCIA = 'SELECT id, protocolo, cod_ocorrencia, data_hora_criacao, data_hora_fim, data_hora_inicio FROM ocorrencia o ORDER BY data_hora_criacao ASC LIMIT :limit OFFSET :offset'
 
     def __init__(self, numMaxThreads, nomeDoTipoDocumento, nomeDoIndice):
         self.fila = deque()
         self.numMaxThreads = numMaxThreads
         self.currentThreadGerenciadoraDeFila = None
-        self.elastic = Elasticsearch()
+        self.elastic = Elasticsearch([self.URL_ELASTIC])
         self.nomeDoTipoDocumento = nomeDoTipoDocumento
         self.nomeDoIndice = nomeDoIndice
 
@@ -42,9 +55,9 @@ class ImportadorElastic:
                 cur.execute(self.SQL_QUERY_OCORRENCIA.replace(':limit', str(fetchSize)).replace(':offset',
                                                                                                 str(fetchSize * page)))
                 ocorrencias = cur.fetchall()
-                future_generator_ocorrencia = {executor.submit(self.__importar, o): o for o in ocorrencias}
+                future_generator_ocorrencia = {executor.submit(self.__importar, ImportadorElastic.ocorrencia_to_map(o)): o for o in ocorrencias}
                 while (not as_completed(future_generator_ocorrencia)):
-                    time.sleep(3)
+                    time.sleep(10)
 
     def __importar(self, registro):
         t = current_thread()
