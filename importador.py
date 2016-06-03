@@ -12,19 +12,61 @@ from tide_connection import TideConnection
 class ImportadorElastic:
     @staticmethod
     def ocorrencia_to_map(o):
+        """
+            o.id,
+            o.protocolo,
+            o.data_hora_criacao,
+            o.data_hora_fim,
+            (o.data_hora_fim - o.data_hora_inicio) AS tempo_total,
+            avg(emp.data_hora_fim - emp.data_hora_criacao) AS tempo_empenho_total,
+            count(emp.id) as qtd_empenhos,
+            ST_X(loc.poligono) as longitude,
+            ST_X(loc.poligono) as latitude
+        :param o:
+
+        :return:
+        """
         map = {
             'id': o[0],
             'protocolo': o[1],
-            'cod_ocorrencia': o[2],
-            'data_hora_criacao': o[3],
-            'data_hora_fim': o[4],
-            'data_hora_inicio': o[5]
+            'data_hora_criacao': o[2],
+            'data_hora_fim': o[3],
+            'tempo_total': int(o[4].total_seconds()),
+            'tempo_empenho_total': int(o[5].total_seconds()),
+            'qtd_empenhos': o[6],
+            'longitude': o[7],
+            'latitude': o[8]
+
         }
         return map
 
     URL_ELASTIC = 'http://192.168.0.7:9200'
     SQL_QUERY_COUNT = 'SELECT COUNT(1) FROM ocorrencia'
-    SQL_QUERY_OCORRENCIA = 'SELECT id, protocolo, cod_ocorrencia, data_hora_criacao, data_hora_fim, data_hora_inicio FROM ocorrencia o ORDER BY data_hora_criacao ASC LIMIT :limit OFFSET :offset'
+    SQL_QUERY_OCORRENCIA = '''
+    SELECT
+        o.id,
+        o.protocolo,
+        o.data_hora_criacao,
+        o.data_hora_fim,
+        (o.data_hora_fim - o.data_hora_inicio) AS tempo_total,
+        avg(emp.data_hora_fim - emp.data_hora_criacao) AS tempo_empenho_empenho,
+        count(emp.id) as qtd_empenhos,
+        ST_X(loc.poligono) as longitude,
+        ST_Y(loc.poligono) as latitude
+    FROM ocorrencia o
+    JOIN localizacao loc
+    ON loc.ocorrencia_id = o.id
+    LEFT JOIN empenho emp
+    ON emp.ocorrencia_id = o.id
+    WHERE o.data_hora_fim IS NOT NULL
+    AND emp.data_hora_criacao IS NOT NULL
+    GROUP BY o.id, o.protocolo, ST_X(loc.poligono),
+    ST_Y(loc.poligono), loc.data_hora_criacao, loc.ocorrencia_id
+    HAVING MAX(loc.data_hora_criacao) = loc.data_hora_criacao
+    ORDER BY o.data_hora_criacao ASC
+    LIMIT :limit
+    OFFSET :offset
+    '''
 
     def __init__(self, numMaxThreads, nomeDoTipoDocumento, nomeDoIndice):
         self.fila = deque()
