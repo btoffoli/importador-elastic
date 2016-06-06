@@ -7,11 +7,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from elasticsearch import Elasticsearch
 from tide import TideService
 from tide_connection import TideConnection
+from sys import argv
 
 
 class ImportadorElastic:
     @staticmethod
-    def ocorrencia_to_map(o):
+    def ocorrencia_to_map(o, pagina):
         """
             o.id,
             o.protocolo,
@@ -27,6 +28,7 @@ class ImportadorElastic:
         :return:
         """
         map = {
+            'pagina': pagina,
             'id': o[0],
             'protocolo': o[1],
             'data_hora_criacao': o[2],
@@ -68,13 +70,17 @@ class ImportadorElastic:
     OFFSET :offset
     '''
 
-    def __init__(self, numMaxThreads, nomeDoTipoDocumento, nomeDoIndice):
+    def __init__(self, numMaxThreads, nomeDoTipoDocumento, nomeDoIndice, urlDBTide = None, urlElastic = None):
         self.fila = deque()
         self.numMaxThreads = numMaxThreads
         self.currentThreadGerenciadoraDeFila = None
-        self.elastic = Elasticsearch([self.URL_ELASTIC])
+        if urlElastic:
+            self.elastic = Elasticsearch([urlElastic])
+        else:
+            self.elastic = Elasticsearch([self.URL_ELASTIC])
         self.nomeDoTipoDocumento = nomeDoTipoDocumento
         self.nomeDoIndice = nomeDoIndice
+        self.urlDBTide = urlDBTide
 
     def iniciarServico(self):
         # self.currentThreadGerenciadoraDeFila = Thread(daemon=True, target=self.importarRegistros)
@@ -83,7 +89,11 @@ class ImportadorElastic:
     def importarRegistros(self):
         fetchSize = 100
         # totalOcorrencias = self.tideService.countOcorrencias()
-        con = TideConnection().getConn()
+        con = None
+        if self.urlDBTide:
+            con = TideConnection().getConn(self.urlDBTide)
+        else:
+            con = TideConnection().getConn()
         cur = con.cursor()
 
         cur.execute(self.SQL_QUERY_COUNT)
@@ -97,19 +107,28 @@ class ImportadorElastic:
                 cur.execute(self.SQL_QUERY_OCORRENCIA.replace(':limit', str(fetchSize)).replace(':offset',
                                                                                                 str(fetchSize * page)))
                 ocorrencias = cur.fetchall()
-                future_generator_ocorrencia = {executor.submit(self.__importar, ImportadorElastic.ocorrencia_to_map(o)): o for o in ocorrencias}
+                future_generator_ocorrencia = {executor.submit(self.__importar, ImportadorElastic.ocorrencia_to_map(o, page)): o for o in ocorrencias}
                 while (not as_completed(future_generator_ocorrencia)):
-                    time.sleep(10)
+                    time.sleep(3)
 
-    def __importar(self, registro):
+    def __importar(self, registro, vez = 0):
         t = current_thread()
         try:
             # print("registro - %s \n" % (str(registro)))
-            self.elastic.index(doc_type=self.nomeDoTipoDocumento, index=self.nomeDoIndice, body=registro)
+            self.elastic.index(doc_type=self.nomeDoTipoDocumento, index=self.nomeDoIndice, id=int(registro['id']), body=registro)
+        except TimeoutError as timeoutEx:
+            if vez < 3:
+                self.__importar(registro, vez + 1)
+            else:
+                print("3 tentativas falharam ao tentar inserir ocorrencia %s" % registro)
         except Exception as e:
             print("Ocorreu um erro com a thread {}, no registro {} - {}\n".format(t, registro, e))
+            #Tenta inserir novamente
+
 
 
 if __name__ == '__main__':
-    imp = ImportadorElastic(20, 'tide', 'ocorrencia')
+    urlDBTide = argv[1]
+    urlElastic = argv[2]
+    imp = ImportadorElastic(30, 'tide', 'ocorrencia', urlDBTide, urlElastic)
     imp.iniciarServico()
